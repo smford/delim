@@ -9,8 +9,6 @@ import (
 
 func main() {
 
-	a := 1
-	a = 2
 	if !term.IsTerminal(0) {
 		fmt.Println("Error: not a terminal")
 		os.Exit(1)
