@@ -13,7 +13,7 @@ builds:
       - linux
       - windows
       - darwin
-    #gobinary: "go1.17.2"
+    gobinary: "go1.18"
     hooks:
       post: /bin/sh scripts/release-script.sh {{ .Path }}
     ldflags:
