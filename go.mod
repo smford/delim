@@ -1,4 +1,4 @@
-module delim
+module github.com/smford/delim
 
 go 1.18
 
