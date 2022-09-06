@@ -16,29 +16,28 @@ import (
 )
 
 const applicationName string = "delim"
-const applicationVersion string = "v0.1"
+const applicationVersion string = "v0.1.1"
 const applicationUrl string = "https://github.com/smford/delim"
 
-var dirname2 string
+var homeDirName string
 
 func init() {
 
-	dirname, err1 := os.UserHomeDir()
-	if err1 != nil {
-		log.Fatal(err1)
-	}
-	fmt.Println(dirname)
-	dirname2 = dirname
+	homeDirName, err := os.UserHomeDir()
+	checkErr(err)
 
 	flag.String("char", "=", "Default line character")
-	flag.String("config", dirname+"/.delim", "Configuration file: /path/to/file.yaml, default = "+dirname+"/.delim")
+	flag.String("config", homeDirName+"/.delim", "Configuration file: /path/to/file.yaml, default = "+homeDirName+"/.delim")
 	flag.Bool("displayconfig", false, "Display configuration")
 	flag.Bool("help", false, "Display help")
 	flag.Bool("version", false, "Display version")
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
-	err := viper.BindPFlags(pflag.CommandLine)
-	checkErr(err)
+	err = viper.BindPFlags(pflag.CommandLine)
+
+	viper.SetEnvPrefix("DELIM")
+	viper.BindEnv("char")
+	viper.BindEnv("config")
 
 	if viper.GetBool("help") {
 		displayHelp()
@@ -104,7 +103,7 @@ func checkErr(err error) {
 func displayHelp() {
 	message := `
       --char [x]            Default line character (default: = ) 
-      --config [file]       Configuration file: /path/to/file.yaml (default: "` + dirname2 + `/.delim")
+      --config [file]       Configuration file: /path/to/file.yaml (default: "` + homeDirName + `/.delim")
       --help                Display help
       --version             Display version`
 	fmt.Println(applicationName + " " + applicationVersion + "\n" + applicationUrl)
