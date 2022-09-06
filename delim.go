@@ -34,10 +34,13 @@ func init() {
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
 	err = viper.BindPFlags(pflag.CommandLine)
+	checkErr(err)
 
 	viper.SetEnvPrefix("DELIM")
-	viper.BindEnv("char")
-	viper.BindEnv("config")
+	err = viper.BindEnv("char")
+	checkErr(err)
+	err = viper.BindEnv("config")
+	checkErr(err)
 
 	if viper.GetBool("help") {
 		displayHelp()
@@ -88,7 +91,7 @@ func main() {
 	}
 
 	for n := 0; n < width; n++ {
-		fmt.Printf(viper.GetString("char"))
+		fmt.Print(viper.GetString("char"))
 	}
 }
 
