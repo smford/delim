@@ -21,7 +21,7 @@ jobs:
         id: go
 
       - name: Checkout
-        uses: actions/checkout@v3.0.2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
@@ -36,7 +36,7 @@ jobs:
     needs: setup
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: build
         run: go build ./...
 
@@ -44,7 +44,7 @@ jobs:
     needs: setup
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: test
         run: go test
 
