@@ -24,7 +24,7 @@ jobs:
         id: go
 
       - name: Checkout
-        uses: actions/checkout@v3.0.2
+        uses: actions/checkout@v3.2.0
         with:
           fetch-depth: 0
 
@@ -39,7 +39,7 @@ jobs:
     needs: setup
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3.2.0
       - name: build
         run: go build ./...
 
@@ -47,7 +47,7 @@ jobs:
     needs: setup
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3.2.0
       - name: test
         run: go test
 
@@ -55,7 +55,7 @@ jobs:
     needs: setup
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v3.2.0
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v3
         with:
