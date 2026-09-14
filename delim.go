@@ -18,7 +18,7 @@ import (
 
 var (
 	applicationName    = "delim"
-	applicationVersion = "v0.1.1"
+	applicationVersion = "dev"
 	applicationURL     = "https://github.com/smford/delim"
 )
 
