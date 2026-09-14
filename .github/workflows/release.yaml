@@ -4,31 +4,105 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
-env:
-  GO_VERSION: "1.19"
+permissions:
+  contents: write
 
 jobs:
-  goreleaser:
+  test:
+    name: Test & Verify
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Verify Dependencies
+        run: go mod verify
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Run Tests with Race Detector
+        run: go test -v -race -cover ./...
+
+  release:
+    name: Create GitHub Release & Homebrew Formula
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
-        id: go
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Determine Release Version
+        id: version
+        run: |
+          git fetch --tags --force
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+            VERSION="${TAG_NAME#v}"
+          else
+            # Default or fallback for manual workflow dispatch without tag
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.1.1")
+            TAG_NAME="${LATEST_TAG}"
+            VERSION="${TAG_NAME#v}"
+          fi
+          echo "tag=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v3
+        uses: goreleaser/goreleaser-action@v6
         with:
-          # either 'goreleaser' (default) or 'goreleaser-pro'
           distribution: goreleaser
           version: latest
-          args: release --rm-dist
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate and Publish Homebrew Formula
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG_NAME: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./scripts/generate_formula.sh "$VERSION" "$TAG_NAME" "dist" "dist/delim.rb"
+
+          # Upload formula asset to GitHub release
+          gh release upload "$TAG_NAME" dist/delim.rb --clobber
+
+          # Publish to smford/homebrew-tap if HOMEBREW_TAP_TOKEN is configured
+          if [ -n "${TAP_TOKEN}" ]; then
+            echo "Publishing updated formula to smford/homebrew-tap..."
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git clone "https://x-access-token:${TAP_TOKEN}@github.com/smford/homebrew-tap.git" tap_repo
+            mkdir -p tap_repo/Formula
+            cp dist/delim.rb tap_repo/Formula/delim.rb
+            cd tap_repo
+            git add Formula/delim.rb
+            if git commit -m "feat(formula): update delim to ${TAG_NAME}"; then
+              git push origin main
+              echo "Successfully pushed formula update to smford/homebrew-tap"
+            else
+              echo "Formula in tap is already up to date"
+            fi
+            cd ..
+            rm -rf tap_repo
+          else
+            echo "HOMEBREW_TAP_TOKEN secret is not set. Formula uploaded to release assets only."
+          fi
