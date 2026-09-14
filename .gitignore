@@ -1,0 +1,17 @@
+# Binaries
+delim
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+
+# GoReleaser
+dist/
+
+# OS artifacts
+.DS_Store

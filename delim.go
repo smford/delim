@@ -1,127 +1,185 @@
 package main
 
 import (
-	"flag"
+	"errors"
 	"fmt"
-	"log"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
-
 	"golang.org/x/term"
 )
 
-const applicationName string = "delim"
-const applicationVersion string = "v0.1.1"
-const applicationUrl string = "https://github.com/smford/delim"
+var (
+	applicationName    = "delim"
+	applicationVersion = "v0.1.1"
+	applicationURL     = "https://github.com/smford/delim"
+)
 
-var homeDirName string
-
-func init() {
-
-	homeDirName, err := os.UserHomeDir()
-	checkErr(err)
-
-	flag.String("char", "=", "Default line character")
-	flag.String("config", homeDirName+"/.delim", "Configuration file: /path/to/file.yaml, default = "+homeDirName+"/.delim")
-	flag.Bool("displayconfig", false, "Display configuration")
-	flag.Bool("help", false, "Display help")
-	flag.Bool("version", false, "Display version")
-	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
-	pflag.Parse()
-	err = viper.BindPFlags(pflag.CommandLine)
-	checkErr(err)
-
-	viper.SetEnvPrefix("DELIM")
-	err = viper.BindEnv("char")
-	checkErr(err)
-	err = viper.BindEnv("config")
-	checkErr(err)
-
-	if viper.GetBool("help") {
-		displayHelp()
-		os.Exit(0)
+func getVersion() string {
+	if applicationVersion != "" && applicationVersion != "dev" {
+		return applicationVersion
 	}
-
-	if viper.GetBool("version") {
-		fmt.Println(applicationName + " " + applicationVersion)
-		os.Exit(0)
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
 	}
-
-	configdir, configfile := filepath.Split(viper.GetString("config"))
-
-	// set default configuration directory to current directory
-	if configdir == "" {
-		configdir = "."
-	}
-
-	viper.SetConfigType("yaml")
-	viper.AddConfigPath(configdir)
-
-	config := strings.TrimSuffix(configfile, ".yaml")
-	config = strings.TrimSuffix(config, ".yml")
-
-	viper.SetConfigName(config)
-
-	err = viper.ReadInConfig()
-	checkErr(err)
-
-	if viper.GetBool("displayconfig") {
-		displayConfig()
-		os.Exit(0)
-	}
+	return applicationVersion
 }
 
-func main() {
-
-	if !term.IsTerminal(0) {
-		fmt.Println("Error: not a terminal")
-		os.Exit(1)
+// buildDelimiter builds the delimiter string efficiently using strings.Repeat.
+func buildDelimiter(char string, width int) string {
+	if width <= 0 || len(char) == 0 {
+		return ""
 	}
-
-	width, _, err := term.GetSize(0)
-
-	if err != nil {
-		fmt.Println("Error: calculating terminal width")
-		os.Exit(2)
-	}
-
-	for n := 0; n < width; n++ {
-		fmt.Print(viper.GetString("char"))
-	}
+	return strings.Repeat(char, width)
 }
 
-// checks errors
-func checkErr(err error) {
-	if err != nil {
-		log.Fatal(err)
+// getTerminalWidth attempts to detect terminal width from standard streams,
+// falling back to COLUMNS env var or default 80 columns.
+func getTerminalWidth(explicitWidth int) int {
+	if explicitWidth > 0 {
+		return explicitWidth
 	}
+
+	for _, f := range []*os.File{os.Stdout, os.Stderr, os.Stdin} {
+		if f != nil && term.IsTerminal(int(f.Fd())) {
+			if width, _, err := term.GetSize(int(f.Fd())); err == nil && width > 0 {
+				return width
+			}
+		}
+	}
+
+	if colsStr := os.Getenv("COLUMNS"); colsStr != "" {
+		if cols, err := strconv.Atoi(colsStr); err == nil && cols > 0 {
+			return cols
+		}
+	}
+
+	return 80
 }
 
-// displays help information
-func displayHelp() {
-	message := `
-      --char [x]            Default line character (default: = ) 
-      --config [file]       Configuration file: /path/to/file.yaml (default: "` + homeDirName + `/.delim")
-      --help                Display help
-      --version             Display version`
-	fmt.Println(applicationName + " " + applicationVersion + "\n" + applicationUrl)
-	fmt.Println(message)
+func printHelp(out io.Writer, defaultConfigFile string) {
+	fmt.Fprintf(out, "%s %s\n%s\n\n", applicationName, getVersion(), applicationURL)
+	fmt.Fprintf(out, "Usage: %s [options]\n\n", applicationName)
+	fmt.Fprintln(out, "Options:")
+	fmt.Fprintln(out, "  -c, --char string        Default line character or pattern (default \"=\")")
+	fmt.Fprintf(out, "      --config string      Configuration file: /path/to/file.yaml (default %q)\n", defaultConfigFile)
+	fmt.Fprintln(out, "  -w, --width int          Line width (default: terminal width)")
+	fmt.Fprintln(out, "  -n, --newline            Print trailing newline (default false)")
+	fmt.Fprintln(out, "      --displayconfig      Display configuration")
+	fmt.Fprintln(out, "  -v, --version            Display version")
+	fmt.Fprintln(out, "  -h, --help               Display help")
 }
 
-// display configuration
-func displayConfig() {
-	allmysettings := viper.AllSettings()
-	var keys []string
-	for k := range allmysettings {
+func printConfig(v *viper.Viper, out io.Writer) {
+	settings := v.AllSettings()
+	keys := make([]string, 0, len(settings))
+	for k := range settings {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		fmt.Println("CONFIG:", k, ":", allmysettings[k])
+		fmt.Fprintf(out, "CONFIG: %s : %v\n", k, settings[k])
+	}
+}
+
+func run(args []string, stdout, stderr io.Writer) error {
+	homeDir, err := os.UserHomeDir()
+	defaultConfigFile := ""
+	if err == nil {
+		defaultConfigFile = filepath.Join(homeDir, ".delim")
+	}
+
+	flags := pflag.NewFlagSet(applicationName, pflag.ContinueOnError)
+	flags.SetOutput(stderr)
+
+	flags.StringP("char", "c", "=", "Default line character")
+	flags.String("config", defaultConfigFile, "Configuration file path")
+	flags.IntP("width", "w", 0, "Line width (default: terminal width)")
+	flags.BoolP("newline", "n", false, "Print trailing newline")
+	flags.Bool("displayconfig", false, "Display configuration")
+	flags.BoolP("version", "v", false, "Display version")
+	flags.BoolP("help", "h", false, "Display help")
+
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+
+	if help, _ := flags.GetBool("help"); help {
+		printHelp(stdout, defaultConfigFile)
+		return nil
+	}
+
+	if ver, _ := flags.GetBool("version"); ver {
+		fmt.Fprintf(stdout, "%s %s\n", applicationName, getVersion())
+		return nil
+	}
+
+	v := viper.New()
+	v.SetEnvPrefix("DELIM")
+	v.AutomaticEnv()
+
+	v.SetDefault("char", "=")
+	v.SetDefault("config", defaultConfigFile)
+	v.SetDefault("width", 0)
+	v.SetDefault("newline", false)
+
+	_ = v.BindPFlag("char", flags.Lookup("char"))
+	_ = v.BindPFlag("config", flags.Lookup("config"))
+	_ = v.BindPFlag("width", flags.Lookup("width"))
+	_ = v.BindPFlag("newline", flags.Lookup("newline"))
+
+	configFile := v.GetString("config")
+	if configFile != "" {
+		if _, err := os.Stat(configFile); err == nil {
+			v.SetConfigFile(configFile)
+			v.SetConfigType("yaml")
+			if err := v.ReadInConfig(); err != nil {
+				return fmt.Errorf("reading config file %q: %w", configFile, err)
+			}
+		} else if flags.Changed("config") {
+			return fmt.Errorf("config file not found: %s", configFile)
+		}
+	}
+
+	if disp, _ := flags.GetBool("displayconfig"); disp {
+		printConfig(v, stdout)
+		return nil
+	}
+
+	explicitWidth := v.GetInt("width")
+	if explicitWidth < 0 {
+		return fmt.Errorf("invalid width %d: width must be non-negative", explicitWidth)
+	}
+
+	width := getTerminalWidth(explicitWidth)
+	char := v.GetString("char")
+	line := buildDelimiter(char, width)
+
+	if _, err := io.WriteString(stdout, line); err != nil {
+		return err
+	}
+	if v.GetBool("newline") {
+		if _, err := io.WriteString(stdout, "\n"); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func main() {
+	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+		if errors.Is(err, pflag.ErrHelp) {
+			os.Exit(0)
+		}
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 }
